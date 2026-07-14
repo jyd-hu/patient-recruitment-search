@@ -249,72 +249,74 @@ export default function Home() {
 
         {lastQuery ? (
           <div className="mt-8">
-            <div
-              className="inline-flex rounded-full bg-gray-100 p-1"
-              role="group"
-              aria-label="Search type"
-            >
-              {(["neural", "keyword"] as const).map((type) => {
-                const active = searchType === type;
+            <div className="flex items-center justify-between gap-4">
+              {results.length > 0 && responseTimeMs !== null ? (
+                <p className="text-sm text-gray-500">
+                  {results.length} results · {responseTimeMs}ms
+                </p>
+              ) : (
+                <span />
+              )}
+              <div
+                className="inline-flex rounded-full bg-gray-100 p-1"
+                role="group"
+                aria-label="Search type"
+              >
+                {(["neural", "keyword"] as const).map((type) => {
+                  const active = searchType === type;
 
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    disabled={loading}
-                    onClick={() => onSearchTypeChange(type)}
-                    className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
-                      active
-                        ? "bg-exablue text-white"
-                        : "bg-transparent text-gray-600"
-                    }`}
-                  >
-                    {type === "neural" ? "Neural" : "Keyword"}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={loading}
+                      onClick={() => onSearchTypeChange(type)}
+                      className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
+                        active
+                          ? "bg-exablue text-white"
+                          : "bg-transparent text-gray-600"
+                      }`}
+                    >
+                      {type === "neural" ? "Neural" : "Keyword"}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {results.length > 0 ? (
-              <>
-                {responseTimeMs !== null ? (
-                  <p className="mt-4 text-sm text-gray-500">
-                    {results.length} results · {responseTimeMs}ms
-                  </p>
-                ) : null}
-                <ul className="mt-4 flex flex-col gap-4">
-                  {results.map((result) => {
-                    const snippet = result.highlights?.[0] ?? "";
+              <ul className="mt-4 flex flex-col gap-4">
+                {results.map((result) => {
+                  const snippet = result.highlights?.[0] ?? "";
 
-                    return (
-                      <li
-                        key={result.id}
-                        className="rounded-xl bg-white p-4 shadow-sm"
+                  return (
+                    <li
+                      key={result.id}
+                      className="rounded-xl bg-white p-4 shadow-sm"
+                    >
+                      <p className="text-xs text-gray-500">
+                        {getDomain(result.url)}
+                      </p>
+                      <a
+                        href={result.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block font-medium text-exablue"
                       >
-                        <p className="text-xs text-gray-500">
-                          {getDomain(result.url)}
+                        {result.title ?? result.url}
+                      </a>
+                      {snippet ? (
+                        <p className="mt-2 text-sm text-gray-600">
+                          <HighlightedSnippet
+                            text={snippet}
+                            phrase={activePhrase}
+                          />
                         </p>
-                        <a
-                          href={result.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1 block font-medium text-exablue"
-                        >
-                          {result.title ?? result.url}
-                        </a>
-                        {snippet ? (
-                          <p className="mt-2 text-sm text-gray-600">
-                            <HighlightedSnippet
-                              text={snippet}
-                              phrase={activePhrase}
-                            />
-                          </p>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             ) : !loading ? (
               <p className="mt-4 text-sm text-gray-600">No results found.</p>
             ) : null}
