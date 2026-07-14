@@ -6,14 +6,28 @@ const exa = new Exa(process.env.EXA_API_KEY);
 type SearchMode = "patient" | "physician";
 
 const PHYSICIAN_DOMAINS = [
+  // Directories — real contact / booking data
+  "healthgrades.com",
+  "zocdoc.com",
+  "vitals.com",
+  // Profiles & research
   "pubmed.ncbi.nlm.nih.gov",
   "doximity.com",
+  // Major hospital / academic systems (incl. common .edu bios)
   "mayoclinic.org",
   "clevelandclinic.org",
   "hopkinsmedicine.org",
   "massgeneral.org",
   "stanfordhealthcare.org",
   "mountsinai.org",
+  "stanford.edu",
+  "harvard.edu",
+  "yale.edu",
+  "ucla.edu",
+  "ucsf.edu",
+  "duke.edu",
+  "upenn.edu",
+  "columbia.edu",
 ];
 
 /** Per-result structured fields via contents.summary.schema (SDK: SummaryContentsOptions.schema). */
@@ -26,7 +40,7 @@ const PHYSICIAN_SUMMARY_SCHEMA = {
     contact: {
       type: "string",
       description:
-        "Email or contact link if present, otherwise empty string",
+        "Best available way to reach this physician: email if present, otherwise phone number. Return empty string if neither is found.",
     },
   },
   required: ["name", "specialty", "affiliation", "contact"],
@@ -70,6 +84,86 @@ function parsePhysicianSummary(summary: unknown): PhysicianSummary {
   };
 }
 
+/** Drop rows with missing / placeholder names so they never reach the table. */
+function hasResolvedPhysicianName(name: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  return !(
+    lower === "null" ||
+    lower === "undefined" ||
+    lower === "n/a" ||
+    lower === "none" ||
+    lower === "unknown" ||
+    lower === "not available" ||
+    lower === "not found"
+  );
+}
+
+function physicianFieldCompleteness(result: PhysicianSummary): number {
+  return [result.name, result.specialty, result.affiliation, result.contact]
+    .filter((v) => typeof v === "string" && v.trim().length > 0).length;
+}
+
+/**
+ * Keep one row per physician name (case-insensitive, trimmed).
+ * Prefer higher composite score; on ties, prefer more complete fields.
+ */
+function dedupePhysiciansByName<
+  T extends PhysicianSummary & { score?: number },
+>(results: T[]): T[] {
+  const bestByName = new Map<string, T>();
+
+  for (const result of results) {
+    const key = result.name.trim().toLowerCase();
+    const existing = bestByName.get(key);
+    if (!existing) {
+      bestByName.set(key, result);
+      continue;
+    }
+
+    const nextScore =
+      typeof result.score === "number" ? result.score : Number.NEGATIVE_INFINITY;
+    const prevScore =
+      typeof existing.score === "number"
+        ? existing.score
+        : Number.NEGATIVE_INFINITY;
+
+    if (nextScore > prevScore) {
+      bestByName.set(key, result);
+    } else if (
+      nextScore === prevScore &&
+      physicianFieldCompleteness(result) > physicianFieldCompleteness(existing)
+    ) {
+      bestByName.set(key, result);
+    }
+  }
+
+  return Array.from(bestByName.values());
+}
+
+/**
+ * Flag (don't rewrite) affiliations that look like specialty/title lists
+ * rather than an institution — schema may be misreading the page.
+ */
+function warnIfAffiliationLooksLikeSpecialty(
+  name: string,
+  affiliation: string
+): void {
+  const trimmed = affiliation.trim();
+  if (!trimmed.includes(",")) return;
+
+  const specialtyLike =
+    /\b(pulmonary|allergy|immunology|cardiology|oncology|neurology|dermatology|rheumatology|endocrinology|gastroenterology|nephrology|hematology|infectious disease|clinical professor|assistant professor|associate professor|faculty)\b/i.test(
+      trimmed
+    );
+  if (!specialtyLike) return;
+
+  console.warn(
+    `[physician] affiliation may be mis-extracted (specialty/title-like) for "${name}": ${trimmed}`
+  );
+}
+
 function buildQuery(mode: SearchMode, indication: string, criteria: string) {
   if (mode === "physician") {
     return `physician or specialist treating ${indication} patients ${criteria}, clinical trial referral`;
@@ -83,6 +177,79 @@ function getDomain(url: string) {
   } catch {
     return url;
   }
+}
+
+/** Friendly names for common patient-channel domains. */
+const KNOWN_SITE_NAMES: Record<string, string> = {
+  "pulmonaryfibrosisnews.com": "Pulmonary Fibrosis News",
+  "connect.mayoclinic.org": "Mayo Clinic Connect",
+  "reddit.com": "Reddit",
+  "inspire.com": "Inspire",
+  "patientslikeme.com": "PatientsLikeMe",
+};
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Title-case a bare domain when no known-site entry exists. */
+function fallbackSiteName(domain: string): string {
+  const withoutTld = domain.replace(
+    /\.(com|org|net|edu|gov|io|co\.uk|co|info|us|health|care)$/i,
+    ""
+  );
+  return withoutTld
+    .split(/[.\-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getSiteName(domain: string): string {
+  if (KNOWN_SITE_NAMES[domain]) return KNOWN_SITE_NAMES[domain];
+  for (const [known, name] of Object.entries(KNOWN_SITE_NAMES)) {
+    if (domain.endsWith(`.${known}`)) return name;
+  }
+  return fallbackSiteName(domain) || domain;
+}
+
+/** Topic/thread from page title, without duplicated site boilerplate. */
+function deriveTopicSnippet(title: string, siteName: string): string {
+  let topic = title.trim();
+  if (!topic) return "";
+
+  const escapedSite = escapeRegExp(siteName);
+  topic = topic.replace(
+    new RegExp(`\\s*[-–—|:·]\\s*${escapedSite}\\b.*$`, "i"),
+    ""
+  );
+  topic = topic.replace(
+    new RegExp(`^${escapedSite}\\s*[-–—|:·]\\s*`, "i"),
+    ""
+  );
+  topic = topic.replace(new RegExp(escapedSite, "ig"), " ");
+  topic = topic
+    .replace(/\s*\|\s*[^|]+$/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[-–—|:·\s]+|[-–—|:·\s]+$/g, "")
+    .trim();
+
+  const words = topic.split(/\s+/).filter(Boolean);
+  if (words.length > 8) {
+    topic = words.slice(0, 8).join(" ");
+  }
+  return topic;
+}
+
+/** "{Site name}, {topic}" — never includes channelType. */
+function buildChannelName(
+  title: string | null | undefined,
+  url: string
+): string {
+  const siteName = getSiteName(getDomain(url));
+  const topic = deriveTopicSnippet(title ?? "", siteName);
+  if (!topic) return siteName;
+  return `${siteName}, ${topic}`;
 }
 
 /** Keep Exa order; skip once a domain hits maxPerDomain; return at most `limit`. */
@@ -184,7 +351,36 @@ function contactabilityScore(contact: string): number {
   const trimmed = contact.trim();
   if (!trimmed) return 2;
   if (trimmed.includes("@")) return 9;
-  return 6;
+  if (looksLikePhone(trimmed)) return 7;
+  // Profile URL fallback ("View profile: …") or any other URL-like contact
+  return 5;
+}
+
+/** Digits-heavy string that isn't an email/URL — treat as phone. */
+function looksLikePhone(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.includes("@")) return false;
+  if (/^https?:\/\//i.test(trimmed) || /^view profile:/i.test(trimmed)) {
+    return false;
+  }
+  const digits = trimmed.replace(/\D/g, "");
+  return digits.length >= 7 && digits.length <= 15;
+}
+
+/**
+ * Prefer email, then phone from the summary; otherwise fall back to the page URL
+ * as a labeled profile link (frontend renders the label as a clickable link).
+ */
+function resolvePhysicianContact(
+  summaryContact: string,
+  pageUrl: string
+): string {
+  const trimmed = summaryContact.trim();
+  if (trimmed.includes("@")) return trimmed;
+  if (looksLikePhone(trimmed)) return trimmed;
+  const url = pageUrl.trim();
+  if (url) return `View profile: ${url}`;
+  return "";
 }
 
 function round1(n: number): number {
@@ -231,46 +427,87 @@ export async function POST(request: Request) {
             },
     });
 
-    const capped = capResultsPerDomain(response.results);
-    const enriched =
-      searchMode === "patient"
-        ? capped.map((result) => ({
-            ...result,
-            channelType: classifyChannelType(
-              result.url,
-              "text" in result && typeof result.text === "string"
-                ? result.text
-                : ""
-            ),
-          }))
-        : capped.map((result) => ({
-            ...result,
-            ...parsePhysicianSummary(
-              "summary" in result ? result.summary : undefined
-            ),
-          }));
+    // Patient: diversify first, then enrich. Physician: parse/filter/score/dedupe, then diversify.
+    if (searchMode === "patient") {
+      const capped = capResultsPerDomain(response.results);
+      const enriched = capped.map((result) => {
+        const channelType = classifyChannelType(
+          result.url,
+          "text" in result && typeof result.text === "string"
+            ? result.text
+            : ""
+        );
+        return {
+          ...result,
+          channelType,
+          channelName: buildChannelName(result.title, result.url),
+        };
+      });
 
-    // Composite score + re-rank for neural only; keyword stays unscored (control).
-    const results =
+      const results =
+        searchType === "neural"
+          ? enriched
+              .map((result) => {
+                const relevanceScore = normalizeRelevanceScore(result.score);
+                const reach = reachScore(result.channelType);
+                return {
+                  ...result,
+                  score: round1(0.6 * relevanceScore + 0.4 * reach),
+                  relevanceScore: round1(relevanceScore),
+                  reachScore: reach,
+                };
+              })
+              .sort((a, b) => b.score - a.score)
+          : enriched.map(({ score: _score, ...rest }) => rest);
+
+      return NextResponse.json({
+        ...response,
+        results,
+      });
+    }
+
+    const physicians = response.results
+      .map((result) => {
+        const fields = parsePhysicianSummary(
+          "summary" in result ? result.summary : undefined
+        );
+        return {
+          ...result,
+          ...fields,
+          contact: resolvePhysicianContact(fields.contact, result.url),
+        };
+      })
+      .filter((result) => hasResolvedPhysicianName(result.name));
+
+    const scored =
       searchType === "neural"
-        ? enriched
+        ? physicians
             .map((result) => {
               const relevanceScore = normalizeRelevanceScore(result.score);
-              const secondary =
-                searchMode === "patient"
-                  ? reachScore(
-                      "channelType" in result ? result.channelType : "Other"
-                    )
-                  : contactabilityScore(
-                      "contact" in result ? result.contact : ""
-                    );
+              const contactability = contactabilityScore(result.contact);
               return {
                 ...result,
-                score: round1(0.6 * relevanceScore + 0.4 * secondary),
+                score: round1(0.6 * relevanceScore + 0.4 * contactability),
+                relevanceScore: round1(relevanceScore),
+                contactabilityScore: contactability,
               };
             })
             .sort((a, b) => b.score - a.score)
-        : enriched.map(({ score: _score, ...rest }) => rest);
+        : physicians.map(({ score: _score, ...rest }) => rest);
+
+    const deduped = dedupePhysiciansByName(scored);
+    for (const result of deduped) {
+      warnIfAffiliationLooksLikeSpecialty(result.name, result.affiliation);
+    }
+    const ordered =
+      searchType === "neural"
+        ? [...deduped].sort((a, b) => {
+            const scoreA = "score" in a && typeof a.score === "number" ? a.score : 0;
+            const scoreB = "score" in b && typeof b.score === "number" ? b.score : 0;
+            return scoreB - scoreA;
+          })
+        : deduped;
+    const results = capResultsPerDomain(ordered);
 
     return NextResponse.json({
       ...response,

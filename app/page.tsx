@@ -1,6 +1,15 @@
 "use client";
 
-import { FormEvent, type ReactNode, useState } from "react";
+import {
+  FormEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { Download, Home as HomeIcon, X } from "lucide-react";
+import * as XLSX from "xlsx";
 
 type SearchType = "neural" | "keyword";
 type SearchMode = "patient" | "physician";
@@ -12,8 +21,12 @@ type SearchResult = {
   url: string;
   highlights?: string[];
   channelType?: string;
+  channelName?: string;
   /** Composite 0–10 score (neural mode only). */
   score?: number;
+  relevanceScore?: number;
+  reachScore?: number;
+  contactabilityScore?: number;
   /** Structured fields from Exa summary schema (physician mode only). */
   name?: string;
   specialty?: string;
@@ -47,55 +60,6 @@ function getDomain(url: string) {
   }
 }
 
-/** Prefer a readable forum/group name over a raw post title. */
-function formatChannelName(
-  title: string | null | undefined,
-  channelType: string | undefined,
-  url: string,
-): string {
-  const raw = (title ?? "").trim();
-  if (!raw) return getDomain(url);
-
-  let candidate = raw;
-
-  // "Post title - Pulmonary Fibrosis News Forums" → trailing community name
-  const dashParts = raw.split(/\s+[-–—]\s+/);
-  if (dashParts.length >= 2) {
-    const trailing = dashParts[dashParts.length - 1].trim();
-    if (
-      trailing.length > 0 &&
-      (/forum|group|community|board|network|news|support|reddit|facebook/i.test(
-        trailing,
-      ) ||
-        trailing.length <= 48)
-    ) {
-      candidate = trailing;
-    }
-  }
-
-  candidate =
-    candidate.replace(/\s*\|\s*[^|]+$/, "").trim() || candidate;
-  candidate = candidate.replace(/\s+Forums$/i, " Forum").trim();
-
-  const type = channelType?.trim();
-  if (!type) return candidate;
-
-  const alreadyLabeled =
-    candidate.toLowerCase().includes(type.toLowerCase()) ||
-    /facebook|reddit|instagram|twitter|\bx\b|forum|group|community/i.test(
-      candidate,
-    );
-
-  if (alreadyLabeled) return candidate;
-
-  const typeLabel =
-    type === "Social media" && /facebook\.com/i.test(url)
-      ? "Facebook group"
-      : type;
-
-  return `${candidate}, ${typeLabel}`;
-}
-
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -125,6 +89,48 @@ function HighlightedSnippet({
       )}
     </>
   );
+}
+
+function PhysicianContactLink({ contact }: { contact: string }) {
+  const PROFILE_PREFIX = "View profile:";
+
+  if (contact.includes("@")) {
+    return (
+      <a
+        href={`mailto:${contact}`}
+        className="text-exablue hover:underline"
+      >
+        {contact}
+      </a>
+    );
+  }
+
+  if (contact.startsWith(PROFILE_PREFIX)) {
+    const url = contact.slice(PROFILE_PREFIX.length).trim();
+    if (!url) return "—";
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-exablue hover:underline"
+      >
+        View profile
+      </a>
+    );
+  }
+
+  // Phone (or other non-email contact from summary)
+  const digits = contact.replace(/[^\d+]/g, "");
+  if (digits.replace(/\D/g, "").length >= 7) {
+    return (
+      <a href={`tel:${digits}`} className="text-exablue hover:underline">
+        {contact}
+      </a>
+    );
+  }
+
+  return <>{contact}</>;
 }
 
 function ResultCards({
@@ -191,7 +197,9 @@ function ResultCards({
                     <dt className="inline font-medium text-gray-700">
                       Contact:{" "}
                     </dt>
-                    <dd className="inline">{result.contact}</dd>
+                    <dd className="inline">
+                      <PhysicianContactLink contact={result.contact} />
+                    </dd>
                   </div>
                 ) : null}
               </dl>
@@ -210,8 +218,62 @@ function ResultCards({
 const thClass =
   "px-3 py-2 text-left text-xs font-medium tracking-wide text-gray-500 uppercase";
 const tdClass = "px-3 py-2.5 text-sm text-gray-800 align-top";
+/** Fits "Rel: 10.0 · Contact: 10.0"; kept fixed so toggle doesn't shift layout. */
+const scoreColClass = "w-[12.5rem] min-w-[12.5rem] max-w-[12.5rem]";
+/** Narrower score col for physician table (name takes more room). */
+const physicianScoreColClass = "w-[10rem] min-w-[10rem] max-w-[10rem]";
+/** Approx. patient "Channel name" share — keeps physician name readable. */
+const physicianNameColClass = "w-[20%]";
+const physicianSpecialtyColClass = "w-[18%]";
+const physicianAffiliationColClass = "w-[22%]";
+const physicianContactColClass = "w-[20%]";
 
-function InfoTooltip({ label }: { label: string }) {
+const TRUNCATE_LIMIT = 50;
+
+function TruncatedCellText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!text) return "—";
+  if (text.length <= TRUNCATE_LIMIT) return <>{text}</>;
+
+  if (expanded) {
+    return (
+      <>
+        {text}{" "}
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="text-exablue hover:underline"
+          aria-label="Collapse text"
+        >
+          less
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {text.slice(0, TRUNCATE_LIMIT)}
+      <button
+        type="button"
+        onClick={() => setExpanded(true)}
+        className="text-exablue hover:underline"
+        aria-label="Expand text"
+      >
+        ...
+      </button>
+    </>
+  );
+}
+
+function InfoTooltip({
+  label,
+  onLearnMore,
+}: {
+  label: string;
+  onLearnMore?: () => void;
+}) {
   return (
     <span className="group relative ml-1 inline-flex shrink-0 align-middle">
       <span
@@ -223,23 +285,147 @@ function InfoTooltip({ label }: { label: string }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute top-full left-1/2 z-50 mt-1.5 w-max max-w-[14rem] -translate-x-1/2 rounded-md bg-gray-800 px-2 py-1.5 text-[11px] font-normal normal-case tracking-normal text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className={`absolute top-full left-1/2 z-50 w-max max-w-[14rem] -translate-x-1/2 pt-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${
+          onLearnMore ? "pointer-events-auto" : "pointer-events-none"
+        }`}
       >
-        {label}
+        <span className="block rounded-md bg-gray-800 px-2 py-1.5 text-[11px] font-normal normal-case tracking-normal text-white shadow-sm">
+          {label}
+          {onLearnMore ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onLearnMore();
+              }}
+              className="mt-1.5 block text-left text-[11px] text-blue-300 underline underline-offset-2 hover:text-blue-200"
+            >
+              Learn more
+            </button>
+          ) : null}
+        </span>
       </span>
     </span>
+  );
+}
+
+function ScoringModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="scoring-modal-title"
+        className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-6 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-4 right-4 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+        >
+          <X className="h-4 w-4" />
+        </button>
+
+        <h2
+          id="scoring-modal-title"
+          className="pr-8 text-lg font-semibold text-gray-900"
+        >
+          How scoring works
+        </h2>
+
+        <div className="mt-5 space-y-5 text-sm leading-relaxed text-gray-700">
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Patient channels</h3>
+            <ul className="mt-2 list-disc space-y-2 pl-5">
+              <li>
+                Relevance: Exa searches by meaning, not exact words - patients rarely
+                use clinical terms. &quot;Sounds like the ocean&quot; and &quot;Coarse
+                crackles in the lung&quot; mean the same thing to Exa
+              </li>
+              <li>
+                Reach: channels are scored higher if they&apos;re active and widely
+                used, so outreach is more likely to be seen
+              </li>
+            </ul>
+            <p className="mt-2">
+              Weighted 60:40, with relevance given greater importance than reach.
+            </p>
+          </section>
+
+          <section>
+            <h3 className="mb-2 font-medium text-gray-900">Physicians</h3>
+            <ul className="mt-2 list-disc space-y-2 pl-5">
+              <li>
+                Relevance: Exa matches by meaning here too - physicians describe
+                things differently across papers and profiles. e.g. &quot;Declining
+                lung function&quot; and &quot;reduced FVC&quot; are treated as the same
+              </li>
+              <li>
+                Contactability: physicians are scored higher if they have a public
+                email, then phone, then a profile link as a fallback
+              </li>
+            </ul>
+            <p className="mt-2">
+              Weighted 60:40, with relevance given greater importance than
+              contactability.
+            </p>
+          </section>
+
+          <p>
+            Exa does two jobs here: finding what&apos;s relevant by meaning, and
+            reading each page to pull out the details that make it usable.
+          </p>
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-exablue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
 function ColumnHeader({
   children,
   tip,
+  className = "",
 }: {
   children: ReactNode;
   tip: string;
+  className?: string;
 }) {
   return (
-    <th className={thClass}>
+    <th className={`${thClass} ${className}`}>
       <span className="inline-flex items-center gap-0.5">
         {children}
         <InfoTooltip label={tip} />
@@ -248,10 +434,112 @@ function ColumnHeader({
   );
 }
 
+function ScoreColumnHeader({
+  tip,
+  showBreakdown,
+  onToggle,
+  colClass = scoreColClass,
+}: {
+  tip: string;
+  showBreakdown: boolean;
+  onToggle: () => void;
+  colClass?: string;
+}) {
+  const [showScoringInfo, setShowScoringInfo] = useState(false);
+
+  return (
+    <>
+      <th
+        className={`${thClass} ${colClass} cursor-pointer select-none transition-colors hover:text-exablue`}
+        onClick={onToggle}
+        aria-pressed={showBreakdown}
+        title="Click to toggle score breakdown"
+      >
+        <span className="inline-flex items-center gap-0.5">
+          Score
+          <span
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <InfoTooltip
+              label={tip}
+              onLearnMore={() => setShowScoringInfo(true)}
+            />
+          </span>
+        </span>
+      </th>
+      <ScoringModal
+        open={showScoringInfo}
+        onClose={() => setShowScoringInfo(false)}
+      />
+    </>
+  );
+}
+
+function formatScoreCell(
+  result: SearchResult,
+  mode: "patient" | "physician",
+  showBreakdown: boolean,
+): string {
+  if (typeof result.score !== "number") return "—";
+  if (!showBreakdown) return String(result.score);
+
+  const rel =
+    typeof result.relevanceScore === "number"
+      ? result.relevanceScore
+      : "—";
+
+  if (mode === "patient") {
+    const reach =
+      typeof result.reachScore === "number" ? result.reachScore : "—";
+    return `Rel: ${rel} · Reach: ${reach}`;
+  }
+
+  const contact =
+    typeof result.contactabilityScore === "number"
+      ? result.contactabilityScore
+      : "—";
+  return `Rel: ${rel} · Contact: ${contact}`;
+}
+
+function downloadXlsx(
+  rows: Record<string, string | number>[],
+  filename: string,
+) {
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+  XLSX.writeFile(workbook, filename);
+}
+
+function exportPatientChannels(results: SearchResult[]) {
+  const rows = results.map((result) => ({
+    "Channel name":
+      result.channelName ?? result.title ?? getDomain(result.url),
+    "Channel type": result.channelType ?? "—",
+    Score: typeof result.score === "number" ? result.score : "—",
+    URL: result.url,
+  }));
+  downloadXlsx(rows, "patient-channels.xlsx");
+}
+
+function exportPhysicianContacts(results: SearchResult[]) {
+  const rows = results.map((result) => ({
+    "Physician name": result.name || result.title || "—",
+    Specialty: result.specialty || "—",
+    Affiliation: result.affiliation || "—",
+    Score: typeof result.score === "number" ? result.score : "—",
+    Contact: result.contact || "—",
+  }));
+  downloadXlsx(rows, "physician-contacts.xlsx");
+}
+
 function PatientResultsTable({ results }: { results: SearchResult[] }) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
+
   return (
     <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
-      <table className="w-full min-w-[36rem] border-collapse">
+      <table className="w-full min-w-[36rem] border-collapse table-fixed">
         <thead className="relative z-10">
           <tr className="border-b border-gray-100">
             <ColumnHeader tip="Name of the forum, group, or community">
@@ -260,32 +548,33 @@ function PatientResultsTable({ results }: { results: SearchResult[] }) {
             <ColumnHeader tip="Category of platform (message board, support group, etc.)">
               Channel type
             </ColumnHeader>
-            <ColumnHeader tip="Composite scoring of the channel, weighted 60:40 relevance:reach">
-              Score
-            </ColumnHeader>
-            <th className={thClass}>URL</th>
+            <ScoreColumnHeader
+              tip="Composite scoring of the channel, weighted 60:40 relevance:reach"
+              showBreakdown={showBreakdown}
+              onToggle={() => setShowBreakdown((v) => !v)}
+            />
+            <th className={`${thClass} w-1/4`}>URL</th>
           </tr>
         </thead>
         <tbody>
           {results.map((result) => (
             <tr key={result.id} className="border-b border-gray-50 last:border-0">
               <td className={`${tdClass} font-medium`}>
-                {formatChannelName(
-                  result.title,
-                  result.channelType,
-                  result.url,
-                )}
+                {result.channelName ?? result.title ?? getDomain(result.url)}
               </td>
               <td className={tdClass}>{result.channelType ?? "—"}</td>
-              <td className={`${tdClass} tabular-nums text-exablue font-medium`}>
-                {typeof result.score === "number" ? result.score : "—"}
+              <td
+                className={`${tdClass} ${scoreColClass} whitespace-nowrap tabular-nums text-exablue font-medium`}
+              >
+                {formatScoreCell(result, "patient", showBreakdown)}
               </td>
-              <td className={tdClass}>
+              <td className={`${tdClass} w-1/4`}>
                 <a
                   href={result.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="break-all text-exablue hover:underline"
+                  className="block truncate text-exablue hover:underline"
+                  title={result.url}
                 >
                   {result.url}
                 </a>
@@ -299,24 +588,41 @@ function PatientResultsTable({ results }: { results: SearchResult[] }) {
 }
 
 function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
+  const [showBreakdown, setShowBreakdown] = useState(false);
+
   return (
     <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
-      <table className="w-full min-w-[40rem] border-collapse">
+      <table className="w-full min-w-[40rem] border-collapse table-fixed">
         <thead className="relative z-10">
           <tr className="border-b border-gray-100">
-            <ColumnHeader tip="Name of the matched physician">
+            <ColumnHeader
+              tip="Name of the matched physician"
+              className={physicianNameColClass}
+            >
               Physician name
             </ColumnHeader>
-            <ColumnHeader tip="Physician's medical specialty">
+            <ColumnHeader
+              tip="Physician's medical specialty"
+              className={physicianSpecialtyColClass}
+            >
               Specialty
             </ColumnHeader>
-            <ColumnHeader tip="Hospital or institution">
+            <ColumnHeader
+              tip="Hospital or institution"
+              className={physicianAffiliationColClass}
+            >
               Affiliation
             </ColumnHeader>
-            <ColumnHeader tip="Composite scoring of the physician, weighted 60:40 relevance:contactability">
-              Score
-            </ColumnHeader>
-            <ColumnHeader tip="Email or contact link, if found">
+            <ScoreColumnHeader
+              tip="Composite scoring of the physician, weighted 60:40 relevance:contactability"
+              showBreakdown={showBreakdown}
+              onToggle={() => setShowBreakdown((v) => !v)}
+              colClass={physicianScoreColClass}
+            />
+            <ColumnHeader
+              tip="Email, phone, or profile page link"
+              className={physicianContactColClass}
+            >
               Contact
             </ColumnHeader>
           </tr>
@@ -324,26 +630,23 @@ function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
         <tbody>
           {results.map((result) => (
             <tr key={result.id} className="border-b border-gray-50 last:border-0">
-              <td className={`${tdClass} font-medium`}>
+              <td className={`${tdClass} ${physicianNameColClass} font-medium`}>
                 {result.name || result.title || "—"}
               </td>
-              <td className={tdClass}>{result.specialty || "—"}</td>
-              <td className={tdClass}>{result.affiliation || "—"}</td>
-              <td className={`${tdClass} tabular-nums text-exablue font-medium`}>
-                {typeof result.score === "number" ? result.score : "—"}
+              <td className={`${tdClass} ${physicianSpecialtyColClass}`}>
+                <TruncatedCellText text={result.specialty || ""} />
               </td>
-              <td className={`${tdClass} break-all`}>
+              <td className={`${tdClass} ${physicianAffiliationColClass}`}>
+                <TruncatedCellText text={result.affiliation || ""} />
+              </td>
+              <td
+                className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums text-exablue font-medium`}
+              >
+                {formatScoreCell(result, "physician", showBreakdown)}
+              </td>
+              <td className={`${tdClass} ${physicianContactColClass} break-all`}>
                 {result.contact ? (
-                  result.contact.includes("@") ? (
-                    <a
-                      href={`mailto:${result.contact}`}
-                      className="text-exablue hover:underline"
-                    >
-                      {result.contact}
-                    </a>
-                  ) : (
-                    result.contact
-                  )
+                  <PhysicianContactLink contact={result.contact} />
                 ) : (
                   "—"
                 )}
@@ -380,6 +683,7 @@ export default function Home() {
   const [resultsCache, setResultsCache] = useState<ResultsCache>({});
   const [responseTimeMs, setResponseTimeMs] = useState<number | null>(null);
   const [showFullResults, setShowFullResults] = useState(false);
+  const searchGeneration = useRef(0);
 
   async function handleSearch(
     ind: string,
@@ -404,6 +708,7 @@ export default function Home() {
       return;
     }
 
+    const generation = ++searchGeneration.current;
     setLoading(true);
     setError(null);
     setResults([]);
@@ -426,12 +731,16 @@ export default function Home() {
         }),
       });
 
+      if (generation !== searchGeneration.current) return;
+
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error ?? "Search failed");
       }
 
       const data = await res.json();
+      if (generation !== searchGeneration.current) return;
+
       const elapsed = Math.round(performance.now() - started);
       const nextResults = Array.isArray(data.results) ? data.results : [];
       setResults(nextResults);
@@ -443,9 +752,12 @@ export default function Home() {
         [key]: { results: nextResults, responseTimeMs: elapsed },
       });
     } catch (err) {
+      if (generation !== searchGeneration.current) return;
       setError(err instanceof Error ? err.message : "Search failed");
     } finally {
-      setLoading(false);
+      if (generation === searchGeneration.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -496,15 +808,41 @@ export default function Home() {
     );
   }
 
+  function onReset() {
+    searchGeneration.current += 1;
+    setIndication("");
+    setCriteria("");
+    setLoading(false);
+    setError(null);
+    setResults([]);
+    setActivePhrase("");
+    setSearchMode("patient");
+    setSearchType("neural");
+    setLastInputs(null);
+    setResultsCache({});
+    setResponseTimeMs(null);
+    setShowFullResults(false);
+  }
+
   return (
-    <div className="min-h-screen bg-marble text-gray-900">
+    <div className="relative min-h-screen bg-marble text-gray-900">
+      <button
+        type="button"
+        onClick={onReset}
+        className="absolute top-6 left-6 rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-exablue"
+        title="Reset"
+        aria-label="Reset page"
+      >
+        <HomeIcon className="h-5 w-5" strokeWidth={1.75} />
+      </button>
+
       <main className="mx-auto max-w-4xl px-6 pt-24 pb-24">
-        <header className="mb-10">
+        <header className="mb-10 text-center">
           <h1 className="text-3xl font-semibold tracking-tight">
             Channel Finder
           </h1>
           <p className="mt-2 text-base italic text-zinc-600">
-            Find patients for your clinical trial — in minutes, not months
+            Find patients for your clinical trial - in minutes, not months
           </p>
         </header>
 
@@ -636,9 +974,26 @@ export default function Home() {
         {lastInputs ? (
           <div className="mt-8">
             {results.length > 0 && responseTimeMs !== null ? (
-              <p className="text-sm text-gray-500">
-                {results.length} results · {responseTimeMs}ms
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-gray-500">
+                  {results.length} results · {responseTimeMs}ms
+                </p>
+                {searchType === "neural" ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      searchMode === "patient"
+                        ? exportPatientChannels(results)
+                        : exportPhysicianContacts(results)
+                    }
+                    className="rounded p-1 text-gray-500 transition-colors hover:text-exablue"
+                    title="Download Excel"
+                    aria-label="Download Excel"
+                  >
+                    <Download className="h-4 w-4" strokeWidth={1.75} />
+                  </button>
+                ) : null}
+              </div>
             ) : null}
 
             {results.length > 0 ? (
