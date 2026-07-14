@@ -11,6 +11,14 @@ type SearchResult = {
   title: string | null;
   url: string;
   highlights?: string[];
+  channelType?: string;
+  /** Composite 0–10 score (neural mode only). */
+  score?: number;
+  /** Structured fields from Exa summary schema (physician mode only). */
+  name?: string;
+  specialty?: string;
+  affiliation?: string;
+  contact?: string;
 };
 
 const EXAMPLES = [
@@ -356,24 +364,67 @@ export default function Home() {
               <ul className="mt-4 flex flex-col gap-4">
                 {results.map((result) => {
                   const snippet = result.highlights?.[0] ?? "";
+                  const isPhysician = searchMode === "physician";
+                  const displayTitle = isPhysician
+                    ? result.name || result.title || result.url
+                    : (result.title ?? result.url);
 
                   return (
                     <li
                       key={result.id}
                       className="rounded-xl bg-white p-4 shadow-sm"
                     >
-                      <p className="text-xs text-gray-500">
-                        {getDomain(result.url)}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs text-gray-500">
+                          {getDomain(result.url)}
+                        </p>
+                        {result.channelType ? (
+                          <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                            {result.channelType}
+                          </span>
+                        ) : null}
+                        {typeof result.score === "number" ? (
+                          <span className="rounded-md bg-exablue/10 px-1.5 py-0.5 text-xs font-medium text-exablue">
+                            Score: {result.score}/10
+                          </span>
+                        ) : null}
+                      </div>
                       <a
                         href={result.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="mt-1 block font-medium text-exablue"
                       >
-                        {result.title ?? result.url}
+                        {displayTitle}
                       </a>
-                      {snippet ? (
+                      {isPhysician ? (
+                        <dl className="mt-2 space-y-1 text-sm text-gray-600">
+                          {result.specialty ? (
+                            <div>
+                              <dt className="inline font-medium text-gray-700">
+                                Specialty:{" "}
+                              </dt>
+                              <dd className="inline">{result.specialty}</dd>
+                            </div>
+                          ) : null}
+                          {result.affiliation ? (
+                            <div>
+                              <dt className="inline font-medium text-gray-700">
+                                Affiliation:{" "}
+                              </dt>
+                              <dd className="inline">{result.affiliation}</dd>
+                            </div>
+                          ) : null}
+                          {result.contact ? (
+                            <div>
+                              <dt className="inline font-medium text-gray-700">
+                                Contact:{" "}
+                              </dt>
+                              <dd className="inline">{result.contact}</dd>
+                            </div>
+                          ) : null}
+                        </dl>
+                      ) : snippet ? (
                         <p className="mt-2 text-sm text-gray-600">
                           <HighlightedSnippet
                             text={snippet}
