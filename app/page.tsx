@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, type ReactNode, useState } from "react";
 
 type SearchType = "neural" | "keyword";
 type SearchMode = "patient" | "physician";
@@ -47,6 +47,55 @@ function getDomain(url: string) {
   }
 }
 
+/** Prefer a readable forum/group name over a raw post title. */
+function formatChannelName(
+  title: string | null | undefined,
+  channelType: string | undefined,
+  url: string,
+): string {
+  const raw = (title ?? "").trim();
+  if (!raw) return getDomain(url);
+
+  let candidate = raw;
+
+  // "Post title - Pulmonary Fibrosis News Forums" → trailing community name
+  const dashParts = raw.split(/\s+[-–—]\s+/);
+  if (dashParts.length >= 2) {
+    const trailing = dashParts[dashParts.length - 1].trim();
+    if (
+      trailing.length > 0 &&
+      (/forum|group|community|board|network|news|support|reddit|facebook/i.test(
+        trailing,
+      ) ||
+        trailing.length <= 48)
+    ) {
+      candidate = trailing;
+    }
+  }
+
+  candidate =
+    candidate.replace(/\s*\|\s*[^|]+$/, "").trim() || candidate;
+  candidate = candidate.replace(/\s+Forums$/i, " Forum").trim();
+
+  const type = channelType?.trim();
+  if (!type) return candidate;
+
+  const alreadyLabeled =
+    candidate.toLowerCase().includes(type.toLowerCase()) ||
+    /facebook|reddit|instagram|twitter|\bx\b|forum|group|community/i.test(
+      candidate,
+    );
+
+  if (alreadyLabeled) return candidate;
+
+  const typeLabel =
+    type === "Social media" && /facebook\.com/i.test(url)
+      ? "Facebook group"
+      : type;
+
+  return `${candidate}, ${typeLabel}`;
+}
+
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -78,6 +127,235 @@ function HighlightedSnippet({
   );
 }
 
+function ResultCards({
+  results,
+  searchMode,
+  activePhrase,
+}: {
+  results: SearchResult[];
+  searchMode: SearchMode;
+  activePhrase: string;
+}) {
+  return (
+    <ul className="flex flex-col gap-4">
+      {results.map((result) => {
+        const snippet = result.highlights?.[0] ?? "";
+        const isPhysician = searchMode === "physician";
+        const displayTitle = isPhysician
+          ? result.name || result.title || result.url
+          : (result.title ?? result.url);
+
+        return (
+          <li key={result.id} className="rounded-xl bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-gray-500">{getDomain(result.url)}</p>
+              {result.channelType ? (
+                <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
+                  {result.channelType}
+                </span>
+              ) : null}
+              {typeof result.score === "number" ? (
+                <span className="rounded-md bg-exablue/10 px-1.5 py-0.5 text-xs font-medium text-exablue">
+                  Score: {result.score}/10
+                </span>
+              ) : null}
+            </div>
+            <a
+              href={result.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 block font-medium text-exablue"
+            >
+              {displayTitle}
+            </a>
+            {isPhysician ? (
+              <dl className="mt-2 space-y-1 text-sm text-gray-600">
+                {result.specialty ? (
+                  <div>
+                    <dt className="inline font-medium text-gray-700">
+                      Specialty:{" "}
+                    </dt>
+                    <dd className="inline">{result.specialty}</dd>
+                  </div>
+                ) : null}
+                {result.affiliation ? (
+                  <div>
+                    <dt className="inline font-medium text-gray-700">
+                      Affiliation:{" "}
+                    </dt>
+                    <dd className="inline">{result.affiliation}</dd>
+                  </div>
+                ) : null}
+                {result.contact ? (
+                  <div>
+                    <dt className="inline font-medium text-gray-700">
+                      Contact:{" "}
+                    </dt>
+                    <dd className="inline">{result.contact}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : snippet ? (
+              <p className="mt-2 text-sm text-gray-600">
+                <HighlightedSnippet text={snippet} phrase={activePhrase} />
+              </p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+const thClass =
+  "px-3 py-2 text-left text-xs font-medium tracking-wide text-gray-500 uppercase";
+const tdClass = "px-3 py-2.5 text-sm text-gray-800 align-top";
+
+function InfoTooltip({ label }: { label: string }) {
+  return (
+    <span className="group relative ml-1 inline-flex shrink-0 align-middle">
+      <span
+        tabIndex={0}
+        aria-label={label}
+        className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-current text-[9px] font-normal normal-case leading-none opacity-30 transition-opacity group-hover:opacity-70 group-focus-within:opacity-70"
+      >
+        i
+      </span>
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute top-full left-1/2 z-50 mt-1.5 w-max max-w-[14rem] -translate-x-1/2 rounded-md bg-gray-800 px-2 py-1.5 text-[11px] font-normal normal-case tracking-normal text-white opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {label}
+      </span>
+    </span>
+  );
+}
+
+function ColumnHeader({
+  children,
+  tip,
+}: {
+  children: ReactNode;
+  tip: string;
+}) {
+  return (
+    <th className={thClass}>
+      <span className="inline-flex items-center gap-0.5">
+        {children}
+        <InfoTooltip label={tip} />
+      </span>
+    </th>
+  );
+}
+
+function PatientResultsTable({ results }: { results: SearchResult[] }) {
+  return (
+    <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+      <table className="w-full min-w-[36rem] border-collapse">
+        <thead className="relative z-10">
+          <tr className="border-b border-gray-100">
+            <ColumnHeader tip="Name of the forum, group, or community">
+              Channel name
+            </ColumnHeader>
+            <ColumnHeader tip="Category of platform (message board, support group, etc.)">
+              Channel type
+            </ColumnHeader>
+            <ColumnHeader tip="Composite scoring of the channel, weighted 60:40 relevance:reach">
+              Score
+            </ColumnHeader>
+            <th className={thClass}>URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((result) => (
+            <tr key={result.id} className="border-b border-gray-50 last:border-0">
+              <td className={`${tdClass} font-medium`}>
+                {formatChannelName(
+                  result.title,
+                  result.channelType,
+                  result.url,
+                )}
+              </td>
+              <td className={tdClass}>{result.channelType ?? "—"}</td>
+              <td className={`${tdClass} tabular-nums text-exablue font-medium`}>
+                {typeof result.score === "number" ? result.score : "—"}
+              </td>
+              <td className={tdClass}>
+                <a
+                  href={result.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all text-exablue hover:underline"
+                >
+                  {result.url}
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
+  return (
+    <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+      <table className="w-full min-w-[40rem] border-collapse">
+        <thead className="relative z-10">
+          <tr className="border-b border-gray-100">
+            <ColumnHeader tip="Name of the matched physician">
+              Physician name
+            </ColumnHeader>
+            <ColumnHeader tip="Physician's medical specialty">
+              Specialty
+            </ColumnHeader>
+            <ColumnHeader tip="Hospital or institution">
+              Affiliation
+            </ColumnHeader>
+            <ColumnHeader tip="Composite scoring of the physician, weighted 60:40 relevance:contactability">
+              Score
+            </ColumnHeader>
+            <ColumnHeader tip="Email or contact link, if found">
+              Contact
+            </ColumnHeader>
+          </tr>
+        </thead>
+        <tbody>
+          {results.map((result) => (
+            <tr key={result.id} className="border-b border-gray-50 last:border-0">
+              <td className={`${tdClass} font-medium`}>
+                {result.name || result.title || "—"}
+              </td>
+              <td className={tdClass}>{result.specialty || "—"}</td>
+              <td className={tdClass}>{result.affiliation || "—"}</td>
+              <td className={`${tdClass} tabular-nums text-exablue font-medium`}>
+                {typeof result.score === "number" ? result.score : "—"}
+              </td>
+              <td className={`${tdClass} break-all`}>
+                {result.contact ? (
+                  result.contact.includes("@") ? (
+                    <a
+                      href={`mailto:${result.contact}`}
+                      className="text-exablue hover:underline"
+                    >
+                      {result.contact}
+                    </a>
+                  ) : (
+                    result.contact
+                  )
+                ) : (
+                  "—"
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 type ResultsCache = Partial<
   Record<CacheKey, { results: SearchResult[]; responseTimeMs: number }>
 >;
@@ -101,6 +379,7 @@ export default function Home() {
   } | null>(null);
   const [resultsCache, setResultsCache] = useState<ResultsCache>({});
   const [responseTimeMs, setResponseTimeMs] = useState<number | null>(null);
+  const [showFullResults, setShowFullResults] = useState(false);
 
   async function handleSearch(
     ind: string,
@@ -121,6 +400,7 @@ export default function Home() {
       setSearchMode(mode);
       setSearchType(type);
       setResultsCache(cache);
+      setShowFullResults(false);
       return;
     }
 
@@ -130,6 +410,7 @@ export default function Home() {
     setResponseTimeMs(null);
     setSearchMode(mode);
     setSearchType(type);
+    setShowFullResults(false);
 
     const started = performance.now();
 
@@ -217,7 +498,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-marble text-gray-900">
-      <main className="mx-auto max-w-2xl px-6 pt-24 pb-24">
+      <main className="mx-auto max-w-4xl px-6 pt-24 pb-24">
         <header className="mb-10">
           <h1 className="text-3xl font-semibold tracking-tight">
             Channel Finder
@@ -361,81 +642,45 @@ export default function Home() {
             ) : null}
 
             {results.length > 0 ? (
-              <ul className="mt-4 flex flex-col gap-4">
-                {results.map((result) => {
-                  const snippet = result.highlights?.[0] ?? "";
-                  const isPhysician = searchMode === "physician";
-                  const displayTitle = isPhysician
-                    ? result.name || result.title || result.url
-                    : (result.title ?? result.url);
+              searchType === "neural" ? (
+                <div className="mt-4">
+                  {searchMode === "patient" ? (
+                    <PatientResultsTable results={results} />
+                  ) : (
+                    <PhysicianResultsTable results={results} />
+                  )}
 
-                  return (
-                    <li
-                      key={result.id}
-                      className="rounded-xl bg-white p-4 shadow-sm"
+                  <div className="mt-4">
+                    <button
+                      type="button"
+                      aria-expanded={showFullResults}
+                      onClick={() => setShowFullResults((open) => !open)}
+                      className="text-sm font-medium text-gray-600 transition-colors hover:text-exablue"
                     >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xs text-gray-500">
-                          {getDomain(result.url)}
-                        </p>
-                        {result.channelType ? (
-                          <span className="rounded-md bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600">
-                            {result.channelType}
-                          </span>
-                        ) : null}
-                        {typeof result.score === "number" ? (
-                          <span className="rounded-md bg-exablue/10 px-1.5 py-0.5 text-xs font-medium text-exablue">
-                            Score: {result.score}/10
-                          </span>
-                        ) : null}
+                      {showFullResults
+                        ? "Hide full results ▴"
+                        : "Show full results ▾"}
+                    </button>
+                    {showFullResults ? (
+                      <div className="mt-4">
+                        <ResultCards
+                          results={results}
+                          searchMode={searchMode}
+                          activePhrase={activePhrase}
+                        />
                       </div>
-                      <a
-                        href={result.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="mt-1 block font-medium text-exablue"
-                      >
-                        {displayTitle}
-                      </a>
-                      {isPhysician ? (
-                        <dl className="mt-2 space-y-1 text-sm text-gray-600">
-                          {result.specialty ? (
-                            <div>
-                              <dt className="inline font-medium text-gray-700">
-                                Specialty:{" "}
-                              </dt>
-                              <dd className="inline">{result.specialty}</dd>
-                            </div>
-                          ) : null}
-                          {result.affiliation ? (
-                            <div>
-                              <dt className="inline font-medium text-gray-700">
-                                Affiliation:{" "}
-                              </dt>
-                              <dd className="inline">{result.affiliation}</dd>
-                            </div>
-                          ) : null}
-                          {result.contact ? (
-                            <div>
-                              <dt className="inline font-medium text-gray-700">
-                                Contact:{" "}
-                              </dt>
-                              <dd className="inline">{result.contact}</dd>
-                            </div>
-                          ) : null}
-                        </dl>
-                      ) : snippet ? (
-                        <p className="mt-2 text-sm text-gray-600">
-                          <HighlightedSnippet
-                            text={snippet}
-                            phrase={activePhrase}
-                          />
-                        </p>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <ResultCards
+                    results={results}
+                    searchMode={searchMode}
+                    activePhrase={activePhrase}
+                  />
+                </div>
+              )
             ) : !loading ? (
               <p className="mt-4 text-sm text-gray-600">No results found.</p>
             ) : null}
