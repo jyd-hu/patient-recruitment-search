@@ -3,6 +3,8 @@
 import { FormEvent, useState } from "react";
 
 type SearchType = "neural" | "keyword";
+type SearchMode = "patient" | "physician";
+type CacheKey = `${SearchMode}:${SearchType}`;
 
 type SearchResult = {
   id: string;
@@ -69,8 +71,12 @@ function HighlightedSnippet({
 }
 
 type ResultsCache = Partial<
-  Record<SearchType, { results: SearchResult[]; responseTimeMs: number }>
+  Record<CacheKey, { results: SearchResult[]; responseTimeMs: number }>
 >;
+
+function cacheKey(mode: SearchMode, type: SearchType): CacheKey {
+  return `${mode}:${type}`;
+}
 
 export default function Home() {
   const [indication, setIndication] = useState("");
@@ -79,24 +85,32 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [activePhrase, setActivePhrase] = useState("");
+  const [searchMode, setSearchMode] = useState<SearchMode>("patient");
   const [searchType, setSearchType] = useState<SearchType>("neural");
-  const [lastQuery, setLastQuery] = useState("");
+  const [lastInputs, setLastInputs] = useState<{
+    indication: string;
+    criteria: string;
+  } | null>(null);
   const [resultsCache, setResultsCache] = useState<ResultsCache>({});
   const [responseTimeMs, setResponseTimeMs] = useState<number | null>(null);
 
   async function handleSearch(
-    query: string,
+    ind: string,
+    crit: string,
+    mode: SearchMode,
     type: SearchType,
-    phrase = indication.trim(),
+    phrase = ind.trim(),
     cache: ResultsCache = {},
   ) {
-    const cached = cache[type];
+    const key = cacheKey(mode, type);
+    const cached = cache[key];
     if (cached) {
       setResults(cached.results);
       setResponseTimeMs(cached.responseTimeMs);
       setError(null);
       setActivePhrase(phrase);
-      setLastQuery(query);
+      setLastInputs({ indication: ind, criteria: crit });
+      setSearchMode(mode);
       setSearchType(type);
       setResultsCache(cache);
       return;
@@ -106,6 +120,8 @@ export default function Home() {
     setError(null);
     setResults([]);
     setResponseTimeMs(null);
+    setSearchMode(mode);
+    setSearchType(type);
 
     const started = performance.now();
 
@@ -113,7 +129,12 @@ export default function Home() {
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ condition: query, type }),
+        body: JSON.stringify({
+          indication: ind,
+          criteria: crit,
+          mode,
+          type,
+        }),
       });
 
       if (!res.ok) {
@@ -127,11 +148,10 @@ export default function Home() {
       setResults(nextResults);
       setResponseTimeMs(elapsed);
       setActivePhrase(phrase);
-      setLastQuery(query);
-      setSearchType(type);
+      setLastInputs({ indication: ind, criteria: crit });
       setResultsCache({
         ...cache,
-        [type]: { results: nextResults, responseTimeMs: elapsed },
+        [key]: { results: nextResults, responseTimeMs: elapsed },
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
@@ -140,28 +160,51 @@ export default function Home() {
     }
   }
 
-  function buildQuery(ind: string, crit: string) {
-    return `${ind.trim()} patients with the following criteria: ${crit.trim()}`;
-  }
-
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    void handleSearch(buildQuery(indication, criteria), searchType);
+    void handleSearch(indication, criteria, searchMode, searchType);
   }
 
   function onExampleClick(example: (typeof EXAMPLES)[number]) {
     setIndication(example.indication);
     setCriteria(example.criteria);
     void handleSearch(
-      buildQuery(example.indication, example.criteria),
+      example.indication,
+      example.criteria,
+      searchMode,
       searchType,
       example.indication,
     );
   }
 
+  function onSearchModeChange(mode: SearchMode) {
+    if (mode === searchMode || loading || !lastInputs) {
+      setSearchMode(mode);
+      return;
+    }
+    void handleSearch(
+      lastInputs.indication,
+      lastInputs.criteria,
+      mode,
+      searchType,
+      activePhrase,
+      resultsCache,
+    );
+  }
+
   function onSearchTypeChange(type: SearchType) {
-    if (type === searchType || loading || !lastQuery) return;
-    void handleSearch(lastQuery, type, activePhrase, resultsCache);
+    if (type === searchType || loading || !lastInputs) {
+      setSearchType(type);
+      return;
+    }
+    void handleSearch(
+      lastInputs.indication,
+      lastInputs.criteria,
+      searchMode,
+      type,
+      activePhrase,
+      resultsCache,
+    );
   }
 
   return (
@@ -223,13 +266,67 @@ export default function Home() {
           </button>
         </form>
 
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <div
+            className="inline-flex rounded-full bg-gray-100 p-1"
+            role="group"
+            aria-label="Discovery mode"
+          >
+            {(["patient", "physician"] as const).map((mode) => {
+              const active = searchMode === mode;
+
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => onSearchModeChange(mode)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
+                    active
+                      ? "bg-exablue text-white"
+                      : "bg-transparent text-gray-600"
+                  }`}
+                >
+                  {mode === "patient" ? "Patient" : "Physician"}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            className="inline-flex rounded-full bg-gray-100 p-1"
+            role="group"
+            aria-label="Search type"
+          >
+            {(["neural", "keyword"] as const).map((type) => {
+              const active = searchType === type;
+
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  disabled={loading}
+                  onClick={() => onSearchTypeChange(type)}
+                  className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
+                    active
+                      ? "bg-exablue text-white"
+                      : "bg-transparent text-gray-600"
+                  }`}
+                >
+                  {type === "neural" ? "Neural" : "Keyword"}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {error ? (
           <p className="mt-4 text-sm text-red-600" role="alert">
             {error}
           </p>
         ) : null}
 
-        {!lastQuery && !loading ? (
+        {!lastInputs && !loading ? (
           <div className="mt-12 flex flex-col items-center gap-3 text-center">
             <p className="text-sm text-gray-600">Try an example:</p>
             <div className="flex flex-wrap justify-center gap-2">
@@ -247,42 +344,13 @@ export default function Home() {
           </div>
         ) : null}
 
-        {lastQuery ? (
+        {lastInputs ? (
           <div className="mt-8">
-            <div className="flex items-center justify-between gap-4">
-              {results.length > 0 && responseTimeMs !== null ? (
-                <p className="text-sm text-gray-500">
-                  {results.length} results · {responseTimeMs}ms
-                </p>
-              ) : (
-                <span />
-              )}
-              <div
-                className="inline-flex rounded-full bg-gray-100 p-1"
-                role="group"
-                aria-label="Search type"
-              >
-                {(["neural", "keyword"] as const).map((type) => {
-                  const active = searchType === type;
-
-                  return (
-                    <button
-                      key={type}
-                      type="button"
-                      disabled={loading}
-                      onClick={() => onSearchTypeChange(type)}
-                      className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
-                        active
-                          ? "bg-exablue text-white"
-                          : "bg-transparent text-gray-600"
-                      }`}
-                    >
-                      {type === "neural" ? "Neural" : "Keyword"}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            {results.length > 0 && responseTimeMs !== null ? (
+              <p className="text-sm text-gray-500">
+                {results.length} results · {responseTimeMs}ms
+              </p>
+            ) : null}
 
             {results.length > 0 ? (
               <ul className="mt-4 flex flex-col gap-4">
