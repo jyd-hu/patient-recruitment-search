@@ -4,6 +4,7 @@ import {
   FormEvent,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -419,13 +420,18 @@ function ColumnHeader({
   children,
   tip,
   className = "",
+  dataOnboarding,
 }: {
   children: ReactNode;
   tip: string;
   className?: string;
+  dataOnboarding?: string;
 }) {
   return (
-    <th className={`${thClass} ${className}`}>
+    <th
+      className={`${thClass} ${className}`}
+      {...(dataOnboarding ? { "data-onboarding": dataOnboarding } : {})}
+    >
       <span className="inline-flex items-center gap-0.5">
         {children}
         <InfoTooltip label={tip} />
@@ -450,6 +456,7 @@ function ScoreColumnHeader({
   return (
     <>
       <th
+        data-onboarding="score"
         className={`${thClass} ${colClass} cursor-pointer select-none transition-colors hover:text-exablue`}
         onClick={onToggle}
         aria-pressed={showBreakdown}
@@ -622,6 +629,7 @@ function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
             <ColumnHeader
               tip="Email, phone, or profile page link"
               className={physicianContactColClass}
+              dataOnboarding="contact"
             >
               Contact
             </ColumnHeader>
@@ -667,6 +675,333 @@ function cacheKey(mode: SearchMode, type: SearchType): CacheKey {
   return `${mode}:${type}`;
 }
 
+type OnboardingTarget =
+  | "inputs"
+  | "mode"
+  | "type"
+  | "score"
+  | "contact"
+  | "download";
+
+const ONBOARDING_CALLOUTS: {
+  target: OnboardingTarget;
+  label: string;
+}[] = [
+  {
+    target: "inputs",
+    label: "Enter your trial's condition and criteria here",
+  },
+  {
+    target: "mode",
+    label: "Toggle between Patient channels and Physicians",
+  },
+  {
+    target: "type",
+    label:
+      "Demo only — toggle Neural vs Keyword to compare Exa neural search with standard keyword search",
+  },
+  {
+    target: "score",
+    label: "Results are ranked by score — click to see the breakdown",
+  },
+  {
+    target: "contact",
+    label: "Use contact details to reach physicians directly",
+  },
+  {
+    target: "download",
+    label: "Export either table to Excel for outreach planning",
+  },
+];
+
+const ONBOARDING_DEMO_ROWS = [
+  {
+    name: "Dr. Sarah Chen",
+    specialty: "Pulmonology",
+    affiliation: "Stanford Medicine",
+    score: 9.2,
+    contact: "s.chen@stanford.edu",
+  },
+  {
+    name: "Dr. James Okonkwo",
+    specialty: "Rheumatology",
+    affiliation: "Mayo Clinic",
+    score: 8.7,
+    contact: "j.okonkwo@mayo.edu",
+  },
+  {
+    name: "Dr. Priya Nair",
+    specialty: "Neurology",
+    affiliation: "UCSF Medical Center",
+    score: 8.1,
+    contact: "View profile: https://profiles.ucsf.edu/priya.nair",
+  },
+] as const;
+
+/** Callout steps that refer to results-table UI (after welcome + first 3 tips). */
+function isTableOnboardingStep(step: number) {
+  const callout = ONBOARDING_CALLOUTS[step - 1];
+  return (
+    callout?.target === "score" ||
+    callout?.target === "contact" ||
+    callout?.target === "download"
+  );
+}
+
+function OnboardingDemoTable() {
+  return (
+    <div className="pointer-events-none mt-8 select-none" aria-hidden="true">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-gray-500">3 results · 412ms</p>
+        <button
+          type="button"
+          tabIndex={-1}
+          className="rounded p-1 text-gray-500"
+          title="Download Excel"
+          aria-label="Download Excel"
+          data-onboarding="download"
+        >
+          <Download className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-xl bg-white shadow-sm">
+        <table className="w-full min-w-[40rem] border-collapse table-fixed">
+          <thead>
+            <tr className="border-b border-gray-100">
+              <th className={`${thClass} ${physicianNameColClass}`}>
+                Physician name
+              </th>
+              <th className={`${thClass} ${physicianSpecialtyColClass}`}>
+                Specialty
+              </th>
+              <th className={`${thClass} ${physicianAffiliationColClass}`}>
+                Affiliation
+              </th>
+              <th
+                data-onboarding="score"
+                className={`${thClass} ${physicianScoreColClass}`}
+              >
+                Score
+              </th>
+              <th
+                data-onboarding="contact"
+                className={`${thClass} ${physicianContactColClass}`}
+              >
+                Contact
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {ONBOARDING_DEMO_ROWS.map((row) => (
+              <tr
+                key={row.name}
+                className="border-b border-gray-50 last:border-0"
+              >
+                <td
+                  className={`${tdClass} ${physicianNameColClass} font-medium`}
+                >
+                  {row.name}
+                </td>
+                <td className={`${tdClass} ${physicianSpecialtyColClass}`}>
+                  {row.specialty}
+                </td>
+                <td className={`${tdClass} ${physicianAffiliationColClass}`}>
+                  {row.affiliation}
+                </td>
+                <td
+                  className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums font-medium text-exablue`}
+                >
+                  {row.score}
+                </td>
+                <td
+                  className={`${tdClass} ${physicianContactColClass} break-all text-exablue`}
+                >
+                  {row.contact.startsWith("View profile:")
+                    ? "View profile"
+                    : row.contact}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+type SpotlightRect = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+};
+
+function resolveOnboardingTarget(
+  target: OnboardingTarget,
+): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-onboarding="${target}"]`);
+}
+
+function OnboardingOverlay({
+  step,
+  onNext,
+  onSkip,
+}: {
+  step: number;
+  onNext: () => void;
+  onSkip: () => void;
+}) {
+  const [spotlight, setSpotlight] = useState<SpotlightRect | null>(null);
+  const [calloutPos, setCalloutPos] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+
+  const isWelcome = step === 0;
+  const calloutIndex = step - 1;
+  const callout = !isWelcome ? ONBOARDING_CALLOUTS[calloutIndex] : null;
+  const totalSteps = ONBOARDING_CALLOUTS.length;
+  const isLast = calloutIndex === totalSteps - 1;
+
+  useLayoutEffect(() => {
+    if (isWelcome || !callout) {
+      setSpotlight(null);
+      setCalloutPos(null);
+      return;
+    }
+
+    const targetKey = callout.target;
+
+    function measure() {
+      const el = resolveOnboardingTarget(targetKey);
+      if (!el) {
+        setSpotlight(null);
+        setCalloutPos({
+          top: window.innerHeight * 0.45,
+          left: window.innerWidth / 2 - 140,
+        });
+        return;
+      }
+
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+      const rect = el.getBoundingClientRect();
+      const pad = 8;
+      setSpotlight({
+        top: rect.top - pad,
+        left: rect.left - pad,
+        width: rect.width + pad * 2,
+        height: rect.height + pad * 2,
+      });
+
+      const calloutWidth = 280;
+      const preferredTop = rect.bottom + 16;
+      const preferredLeft = Math.min(
+        Math.max(16, rect.left + rect.width / 2 - calloutWidth / 2),
+        window.innerWidth - calloutWidth - 16,
+      );
+      const top =
+        preferredTop + 140 > window.innerHeight
+          ? Math.max(16, rect.top - 148)
+          : preferredTop;
+
+      setCalloutPos({ top, left: preferredLeft });
+    }
+
+    measure();
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("scroll", measure, true);
+    };
+  }, [isWelcome, callout]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Onboarding"
+    >
+      {spotlight ? (
+        <div
+          className="pointer-events-none absolute rounded-xl ring-2 ring-white/80"
+          style={{
+            top: spotlight.top,
+            left: spotlight.left,
+            width: spotlight.width,
+            height: spotlight.height,
+            boxShadow: "0 0 0 9999px rgba(0, 0, 0, 0.6)",
+          }}
+          aria-hidden="true"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-black/60" aria-hidden="true" />
+      )}
+
+      {/* Blocks interaction with the app underneath (spotlight box-shadow is not hit-tested) */}
+      <div className="absolute inset-0" aria-hidden="true" />
+
+      {isWelcome ? (
+        <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
+          <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
+            Channel Finder
+          </h2>
+          <p className="mt-3 max-w-md text-base italic text-white/80 sm:text-lg">
+            Find patients for your clinical trial - in minutes, not months
+          </p>
+          <div className="mt-10 flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={onNext}
+              className="rounded-lg bg-exablue px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+            >
+              Get started
+            </button>
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-sm text-white/70 transition-colors hover:text-white"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      ) : callout && calloutPos ? (
+        <div
+          className="absolute z-10 w-[280px] rounded-xl bg-white p-4 shadow-lg"
+          style={{ top: calloutPos.top, left: calloutPos.left }}
+        >
+          <p className="text-sm text-gray-800">{callout.label}</p>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <span className="text-xs text-gray-400">
+              {calloutIndex + 1} of {totalSteps}
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onSkip}
+                className="text-sm text-gray-500 transition-colors hover:text-gray-800"
+              >
+                Skip
+              </button>
+              <button
+                type="button"
+                onClick={onNext}
+                className="rounded-lg bg-exablue px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+              >
+                {isLast ? "Done" : "Next"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Home() {
   const [indication, setIndication] = useState("");
   const [criteria, setCriteria] = useState("");
@@ -683,7 +1018,21 @@ export default function Home() {
   const [resultsCache, setResultsCache] = useState<ResultsCache>({});
   const [responseTimeMs, setResponseTimeMs] = useState<number | null>(null);
   const [showFullResults, setShowFullResults] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState(0);
   const searchGeneration = useRef(0);
+
+  function dismissOnboarding() {
+    setShowOnboarding(false);
+  }
+
+  function advanceOnboarding() {
+    if (onboardingStep >= ONBOARDING_CALLOUTS.length) {
+      dismissOnboarding();
+      return;
+    }
+    setOnboardingStep((s) => s + 1);
+  }
 
   async function handleSearch(
     ind: string,
@@ -826,6 +1175,14 @@ export default function Home() {
 
   return (
     <div className="relative min-h-screen bg-marble text-gray-900">
+      {showOnboarding ? (
+        <OnboardingOverlay
+          step={onboardingStep}
+          onNext={advanceOnboarding}
+          onSkip={dismissOnboarding}
+        />
+      ) : null}
+
       <button
         type="button"
         onClick={onReset}
@@ -847,7 +1204,10 @@ export default function Home() {
         </header>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+          <div
+            data-onboarding="inputs"
+            className="flex flex-col gap-4 sm:flex-row sm:items-end"
+          >
             <label className="flex w-full flex-col gap-1.5 sm:w-36">
               <span className="text-sm font-medium">Indication</span>
               <input
@@ -895,6 +1255,7 @@ export default function Home() {
 
         <div className="mt-4 flex items-center justify-between gap-4">
           <div
+            data-onboarding="mode"
             className="inline-flex rounded-full bg-gray-100 p-1"
             role="group"
             aria-label="Discovery mode"
@@ -921,6 +1282,7 @@ export default function Home() {
           </div>
 
           <div
+            data-onboarding="type"
             className="inline-flex rounded-full bg-gray-100 p-1"
             role="group"
             aria-label="Search type"
@@ -947,13 +1309,22 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Demo results table for table-related onboarding callouts */}
+        {showOnboarding &&
+        !lastInputs &&
+        isTableOnboardingStep(onboardingStep) ? (
+          <OnboardingDemoTable />
+        ) : null}
+
         {error ? (
           <p className="mt-4 text-sm text-red-600" role="alert">
             {error}
           </p>
         ) : null}
 
-        {!lastInputs && !loading ? (
+        {!lastInputs &&
+        !loading &&
+        !(showOnboarding && isTableOnboardingStep(onboardingStep)) ? (
           <div className="mt-12 flex flex-col items-center gap-3 text-center">
             <p className="text-sm text-gray-600">Try an example:</p>
             <div className="flex flex-wrap justify-center gap-2">
@@ -989,6 +1360,7 @@ export default function Home() {
                     className="rounded p-1 text-gray-500 transition-colors hover:text-exablue"
                     title="Download Excel"
                     aria-label="Download Excel"
+                    data-onboarding="download"
                   >
                     <Download className="h-4 w-4" strokeWidth={1.75} />
                   </button>
