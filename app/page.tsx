@@ -483,6 +483,15 @@ function ScoreColumnHeader({
   );
 }
 
+/** Colour classes for composite score text: 7–10 green, 4–6.9 amber, 0–3.9 grey.
+ *  Uses ! so it wins over `text-gray-800` on `tdClass`. */
+function scoreTextClass(score: number | undefined): string {
+  if (typeof score !== "number") return "!text-gray-400";
+  if (score >= 7) return "!text-green-600";
+  if (score >= 4) return "!text-amber-500";
+  return "!text-gray-400";
+}
+
 function formatScoreCell(
   result: SearchResult,
   mode: "patient" | "physician",
@@ -556,7 +565,7 @@ function PatientResultsTable({ results }: { results: SearchResult[] }) {
               Channel type
             </ColumnHeader>
             <ScoreColumnHeader
-              tip="Composite scoring of the channel, weighted 60:40 relevance:reach"
+              tip="0–10. Higher = more relevant and active; lower = weaker fit for outreach."
               showBreakdown={showBreakdown}
               onToggle={() => setShowBreakdown((v) => !v)}
             />
@@ -571,7 +580,7 @@ function PatientResultsTable({ results }: { results: SearchResult[] }) {
               </td>
               <td className={tdClass}>{result.channelType ?? "—"}</td>
               <td
-                className={`${tdClass} ${scoreColClass} whitespace-nowrap tabular-nums text-exablue font-medium`}
+                className={`${tdClass} ${scoreColClass} whitespace-nowrap tabular-nums font-medium ${scoreTextClass(result.score)}`}
               >
                 {formatScoreCell(result, "patient", showBreakdown)}
               </td>
@@ -621,7 +630,7 @@ function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
               Affiliation
             </ColumnHeader>
             <ScoreColumnHeader
-              tip="Composite scoring of the physician, weighted 60:40 relevance:contactability"
+              tip="0–10. Higher = more relevant and contactable; lower = weaker fit for outreach."
               showBreakdown={showBreakdown}
               onToggle={() => setShowBreakdown((v) => !v)}
               colClass={physicianScoreColClass}
@@ -648,7 +657,7 @@ function PhysicianResultsTable({ results }: { results: SearchResult[] }) {
                 <TruncatedCellText text={result.affiliation || ""} />
               </td>
               <td
-                className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums text-exablue font-medium`}
+                className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums font-medium ${scoreTextClass(result.score)}`}
               >
                 {formatScoreCell(result, "physician", showBreakdown)}
               </td>
@@ -810,7 +819,7 @@ function OnboardingDemoTable() {
                   {row.affiliation}
                 </td>
                 <td
-                  className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums font-medium text-exablue`}
+                  className={`${tdClass} ${physicianScoreColClass} whitespace-nowrap tabular-nums font-medium ${scoreTextClass(row.score)}`}
                 >
                   {row.score}
                 </td>
