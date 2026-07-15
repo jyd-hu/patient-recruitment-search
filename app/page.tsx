@@ -947,7 +947,7 @@ function OnboardingOverlay({
       {isWelcome ? (
         <div className="relative z-10 flex h-full flex-col items-center justify-center px-6 text-center">
           <h2 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-            Channel Finder
+            Trial-Scout
           </h2>
           <p className="mt-3 max-w-md text-base italic text-white/80 sm:text-lg">
             Find patients for your clinical trial - in minutes, not months
@@ -1196,7 +1196,7 @@ export default function Home() {
       <main className="mx-auto max-w-4xl px-6 pt-24 pb-24">
         <header className="mb-10 text-center">
           <h1 className="text-3xl font-semibold tracking-tight">
-            Channel Finder
+            Trial-Scout
           </h1>
           <p className="mt-2 text-base italic text-zinc-600">
             Find patients for your clinical trial - in minutes, not months
