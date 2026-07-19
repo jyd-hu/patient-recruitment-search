@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { Download, Home as HomeIcon, X } from "lucide-react";
 import * as XLSX from "xlsx";
+import Onboarding from "@/components/Onboarding";
 
 type SearchType = "neural" | "keyword";
 type SearchMode = "patient" | "physician";
@@ -1012,6 +1013,7 @@ function OnboardingOverlay({
 }
 
 export default function Home() {
+  const [enteredDemo, setEnteredDemo] = useState(false);
   const [indication, setIndication] = useState("");
   const [criteria, setCriteria] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1028,7 +1030,8 @@ export default function Home() {
   const [responseTimeMs, setResponseTimeMs] = useState<number | null>(null);
   const [showFullResults, setShowFullResults] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(true);
-  const [onboardingStep, setOnboardingStep] = useState(0);
+  // Start at first product-tour callout — narrative landing lives in Onboarding.
+  const [onboardingStep, setOnboardingStep] = useState(1);
   const searchGeneration = useRef(0);
 
   function dismissOnboarding() {
@@ -1180,6 +1183,10 @@ export default function Home() {
     setResultsCache({});
     setResponseTimeMs(null);
     setShowFullResults(false);
+  }
+
+  if (!enteredDemo) {
+    return <Onboarding onComplete={() => setEnteredDemo(true)} />;
   }
 
   return (

@@ -1,0 +1,244 @@
+"use client";
+
+import { useEffect, useState, type ReactNode } from "react";
+
+type Screen = "landing" | "problem" | "approach" | "solution";
+
+type OnboardingProps = {
+  onComplete: () => void;
+};
+
+const STAGGER_MS = 450; // 150ms × 3 (+200%)
+const FADE_MS = 1500; // 500ms × 3 (+200%)
+const HINT_FADE_MS = 250;
+
+function FadeIn({
+  delayMs = 0,
+  durationMs = FADE_MS,
+  skip = false,
+  className = "",
+  children,
+}: {
+  delayMs?: number;
+  durationMs?: number;
+  skip?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  const [visible, setVisible] = useState(skip);
+
+  useEffect(() => {
+    if (skip) {
+      setVisible(true);
+      return;
+    }
+
+    setVisible(false);
+    const id = window.setTimeout(() => setVisible(true), delayMs);
+    return () => window.clearTimeout(id);
+  }, [delayMs, skip]);
+
+  return (
+    <div
+      className={`transition-all ease-out ${className}`}
+      style={{
+        transitionDuration: skip ? "0ms" : `${durationMs}ms`,
+        opacity: visible ? 1 : 0,
+        transform: visible ? "translateY(0)" : "translateY(0.75rem)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function FullScreen({
+  onClick,
+  children,
+}: {
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center bg-neutral-950 px-6 text-center text-white"
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      <div className="flex w-full max-w-3xl flex-col items-center">{children}</div>
+    </div>
+  );
+}
+
+/** Hint appears as the last text line finishes fading in. */
+function hintDelayAfterLastLine(lastLineIndex: number) {
+  return lastLineIndex * STAGGER_MS + FADE_MS;
+}
+
+function ClickHint({
+  delayMs,
+  skip,
+  label,
+}: {
+  delayMs: number;
+  skip: boolean;
+  label: string;
+}) {
+  return (
+    <FadeIn
+      delayMs={delayMs}
+      durationMs={HINT_FADE_MS}
+      skip={skip}
+      className="mt-12"
+    >
+      <p className="text-sm tracking-wide text-white/50">{label}</p>
+    </FadeIn>
+  );
+}
+
+function screenHintDelay(screen: Screen): number {
+  if (screen === "landing") return 0;
+  if (screen === "problem") return hintDelayAfterLastLine(1);
+  if (screen === "approach") return hintDelayAfterLastLine(2);
+  return hintDelayAfterLastLine(2); // solution
+}
+
+export default function Onboarding({ onComplete }: OnboardingProps) {
+  const [screen, setScreen] = useState<Screen>("landing");
+  const [skip, setSkip] = useState(false);
+  const [ready, setReady] = useState(true);
+
+  useEffect(() => {
+    if (screen === "landing" || skip) {
+      setReady(true);
+      return;
+    }
+
+    setReady(false);
+    const id = window.setTimeout(
+      () => setReady(true),
+      screenHintDelay(screen),
+    );
+    return () => window.clearTimeout(id);
+  }, [screen, skip]);
+
+  function goTo(next: Screen) {
+    setSkip(false);
+    setScreen(next);
+  }
+
+  function handleScreenClick(advance: () => void) {
+    if (!ready) {
+      setSkip(true);
+      return;
+    }
+    advance();
+  }
+
+  if (screen === "landing") {
+    return (
+      <FullScreen onClick={() => goTo("problem")}>
+        <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
+          Trial-Scout
+        </h1>
+        <p className="mt-3 max-w-md text-base italic text-white/80 sm:text-lg">
+          Find patients for your clinical trial - in minutes, not months
+        </p>
+        <p className="mt-10 text-sm tracking-wide text-white/50">
+          Click to begin
+        </p>
+      </FullScreen>
+    );
+  }
+
+  if (screen === "problem") {
+    const lines = [
+      "80-85% of trials miss their enrollment timeline.",
+      "Recruitment alone eats 20-30% of total trial budget.",
+    ];
+    const hintDelay = hintDelayAfterLastLine(lines.length - 1);
+
+    return (
+      <FullScreen
+        key="problem"
+        onClick={() => handleScreenClick(() => goTo("approach"))}
+      >
+        <div className="flex flex-col gap-6">
+          {lines.map((line, i) => (
+            <FadeIn key={line} delayMs={i * STAGGER_MS} skip={skip}>
+              <p className="text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
+                {line}
+              </p>
+            </FadeIn>
+          ))}
+        </div>
+        <ClickHint delayMs={hintDelay} skip={skip} label="Click to continue" />
+      </FullScreen>
+    );
+  }
+
+  if (screen === "approach") {
+    const lines = [
+      "Keyword search fails here: patients don't use clinical terms, and physicians describe fit through case patterns, not single keywords.",
+      "The signal lives in conversational text and scattered publications, rather than structured medical pages.",
+      "Neural search reads for meaning, so it finds both.",
+    ];
+    const hintDelay = hintDelayAfterLastLine(lines.length - 1);
+
+    return (
+      <FullScreen
+        key="approach"
+        onClick={() => handleScreenClick(() => goTo("solution"))}
+      >
+        <div className="flex flex-col gap-6">
+          {lines.map((line, i) => (
+            <FadeIn key={line} delayMs={i * STAGGER_MS} skip={skip}>
+              <p className="text-2xl font-medium leading-snug text-balance sm:text-3xl">
+                {line}
+              </p>
+            </FadeIn>
+          ))}
+        </div>
+        <ClickHint delayMs={hintDelay} skip={skip} label="Click to continue" />
+      </FullScreen>
+    );
+  }
+
+  // solution
+  return (
+    <FullScreen
+      key="solution"
+      onClick={() => handleScreenClick(onComplete)}
+    >
+      <FadeIn skip={skip}>
+        <p className="text-5xl font-semibold tracking-tight sm:text-6xl">
+          Trial-Scout
+        </p>
+      </FadeIn>
+      <FadeIn delayMs={STAGGER_MS} skip={skip} className="mt-8">
+        <p className="text-2xl font-medium leading-snug text-balance sm:text-3xl">
+          We surface patient channels and physicians, not individual patients.
+        </p>
+      </FadeIn>
+      <FadeIn delayMs={STAGGER_MS * 2} skip={skip} className="mt-6">
+        <p className="max-w-2xl text-lg leading-relaxed text-white/75 text-balance sm:text-xl">
+          Patient data is private and often regulated (HIPAA/GDPR). Channels
+          (communities, forums, advocacy groups) are public, aggregate, and
+          consent-safe to target.
+        </p>
+      </FadeIn>
+      <ClickHint
+        delayMs={hintDelayAfterLastLine(2)}
+        skip={skip}
+        label="Click to enter"
+      />
+    </FullScreen>
+  );
+}
