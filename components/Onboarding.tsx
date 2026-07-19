@@ -12,6 +12,13 @@ const STAGGER_MS = 450; // 150ms × 3 (+200%)
 const FADE_MS = 1500; // 500ms × 3 (+200%)
 const HINT_FADE_MS = 250;
 
+const BG_POSITION: Record<Screen, string> = {
+  landing: "calc(50% - 1.5cm) 0%",
+  problem: "calc(50% - 1.5cm) 20%",
+  approach: "calc(50% - 1.5cm) 40%",
+  solution: "calc(50% - 1.5cm) 60%",
+};
+
 function FadeIn({
   delayMs = 0,
   durationMs = FADE_MS,
@@ -63,7 +70,7 @@ function FullScreen({
     <div
       role="button"
       tabIndex={0}
-      className="fixed inset-0 z-50 flex cursor-pointer flex-col items-center justify-center bg-neutral-950 px-6 text-center text-white"
+      className="absolute inset-0 z-10 flex cursor-pointer flex-col items-center justify-center px-6 text-center text-white"
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -107,7 +114,7 @@ function screenHintDelay(screen: Screen): number {
   if (screen === "landing") return 0;
   if (screen === "problem") return hintDelayAfterLastLine(1);
   if (screen === "approach") return hintDelayAfterLastLine(2);
-  return hintDelayAfterLastLine(2); // solution
+  return hintDelayAfterLastLine(1); // solution
 }
 
 export default function Onboarding({ onComplete }: OnboardingProps) {
@@ -142,8 +149,10 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     advance();
   }
 
+  let content: ReactNode;
+
   if (screen === "landing") {
-    return (
+    content = (
       <FullScreen onClick={() => goTo("problem")}>
         <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">
           Trial-Scout
@@ -156,16 +165,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         </p>
       </FullScreen>
     );
-  }
-
-  if (screen === "problem") {
+  } else if (screen === "problem") {
     const lines = [
       "80-85% of trials miss their enrollment timeline.",
       "Recruitment alone eats 20-30% of total trial budget.",
     ];
     const hintDelay = hintDelayAfterLastLine(lines.length - 1);
 
-    return (
+    content = (
       <FullScreen
         key="problem"
         onClick={() => handleScreenClick(() => goTo("approach"))}
@@ -182,9 +189,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         <ClickHint delayMs={hintDelay} skip={skip} label="Click to continue" />
       </FullScreen>
     );
-  }
-
-  if (screen === "approach") {
+  } else if (screen === "approach") {
     const lines = [
       "Keyword search fails here: patients don't use clinical terms, and physicians describe fit through case patterns, not single keywords.",
       "The signal lives in conversational text and scattered publications, rather than structured medical pages.",
@@ -192,7 +197,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     ];
     const hintDelay = hintDelayAfterLastLine(lines.length - 1);
 
-    return (
+    content = (
       <FullScreen
         key="approach"
         onClick={() => handleScreenClick(() => goTo("solution"))}
@@ -209,36 +214,52 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         <ClickHint delayMs={hintDelay} skip={skip} label="Click to continue" />
       </FullScreen>
     );
+  } else {
+    content = (
+      <FullScreen
+        key="solution"
+        onClick={() => handleScreenClick(onComplete)}
+      >
+        <FadeIn skip={skip}>
+          <p className="text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
+            Trial-Scout surfaces patient channels and physicians, not
+            individual patients.
+          </p>
+        </FadeIn>
+        <FadeIn delayMs={STAGGER_MS} skip={skip} className="mt-8">
+          <p className="max-w-2xl text-lg leading-relaxed text-white/75 text-balance sm:text-xl">
+            Patient data is private and often regulated (HIPAA/GDPR). Channels
+            (communities, forums, advocacy groups) are public, aggregate, and
+            consent-safe to target.
+          </p>
+        </FadeIn>
+        <ClickHint
+          delayMs={hintDelayAfterLastLine(1)}
+          skip={skip}
+          label="Click to enter"
+        />
+      </FullScreen>
+    );
   }
 
-  // solution
   return (
-    <FullScreen
-      key="solution"
-      onClick={() => handleScreenClick(onComplete)}
-    >
-      <FadeIn skip={skip}>
-        <p className="text-5xl font-semibold tracking-tight sm:text-6xl">
-          Trial-Scout
-        </p>
-      </FadeIn>
-      <FadeIn delayMs={STAGGER_MS} skip={skip} className="mt-8">
-        <p className="text-2xl font-medium leading-snug text-balance sm:text-3xl">
-          We surface patient channels and physicians, not individual patients.
-        </p>
-      </FadeIn>
-      <FadeIn delayMs={STAGGER_MS * 2} skip={skip} className="mt-6">
-        <p className="max-w-2xl text-lg leading-relaxed text-white/75 text-balance sm:text-xl">
-          Patient data is private and often regulated (HIPAA/GDPR). Channels
-          (communities, forums, advocacy groups) are public, aggregate, and
-          consent-safe to target.
-        </p>
-      </FadeIn>
-      <ClickHint
-        delayMs={hintDelayAfterLastLine(2)}
-        skip={skip}
-        label="Click to enter"
+    <div className="fixed inset-0 z-50">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-no-repeat"
+        style={{
+          backgroundImage: "url(/onboarding-bg.jpg)",
+          backgroundSize: "120%",
+          backgroundPosition: BG_POSITION[screen],
+          transition: "background-position 800ms ease-out",
+          filter: "grayscale(40%)",
+        }}
       />
-    </FullScreen>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-black/60"
+      />
+      {content}
+    </div>
   );
 }
