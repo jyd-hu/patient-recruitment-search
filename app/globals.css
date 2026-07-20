@@ -6,7 +6,11 @@
 }
 
 @theme inline {
-  --color-exablue: #1e40ed;
+  /* Delfa brand yellow — https://www.delfa.ai */
+  --color-exablue: #ffca51;
+  --color-delfa-yellow: #ffca51;
+  --color-delfa-yellow-hover: #ffd26b;
+  --color-delfa-cream: #fffbeb;
   --color-marble: #faf9f8;
   --color-background: var(--background);
   --color-foreground: var(--foreground);

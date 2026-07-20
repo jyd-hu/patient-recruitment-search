@@ -82,7 +82,7 @@ function HighlightedSnippet({
     <>
       {parts.map((part, index) =>
         part.toLowerCase() === trimmed.toLowerCase() ? (
-          <mark key={index} className="bg-blue-100 text-inherit">
+          <mark key={index} className="bg-delfa-cream text-inherit">
             {part}
           </mark>
         ) : (
@@ -300,7 +300,7 @@ function InfoTooltip({
                 e.stopPropagation();
                 onLearnMore();
               }}
-              className="mt-1.5 block text-left text-[11px] text-blue-300 underline underline-offset-2 hover:text-blue-200"
+              className="mt-1.5 block text-left text-[11px] text-exablue/80 underline underline-offset-2 hover:text-exablue"
             >
               Learn more
             </button>
@@ -406,7 +406,7 @@ function ScoringModal({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-exablue px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+            className="rounded-lg bg-exablue px-4 py-2 text-sm font-medium text-gray-900 transition-colors hover:bg-delfa-yellow-hover"
           >
             Close
           </button>
@@ -966,7 +966,7 @@ function OnboardingOverlay({
             <button
               type="button"
               onClick={onNext}
-              className="rounded-lg bg-exablue px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+              className="rounded-lg bg-exablue px-6 py-2.5 text-sm font-medium text-gray-900 transition-colors hover:bg-delfa-yellow-hover"
             >
               Get started
             </button>
@@ -1000,7 +1000,7 @@ function OnboardingOverlay({
               <button
                 type="button"
                 onClick={onNext}
-                className="rounded-lg bg-exablue px-3.5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-exablue/90"
+                className="rounded-lg bg-exablue px-3.5 py-1.5 text-sm font-medium text-gray-900 transition-colors hover:bg-delfa-yellow-hover"
               >
                 {isLast ? "Done" : "Next"}
               </button>
@@ -1259,7 +1259,7 @@ export default function Home() {
             type="submit"
             disabled={loading}
             aria-busy={loading}
-            className="flex h-10 items-center justify-center rounded-lg bg-exablue px-4 text-sm font-medium text-white disabled:opacity-60"
+            className="flex h-10 items-center justify-center rounded-lg bg-exablue px-4 text-sm font-medium text-gray-900 disabled:opacity-60"
           >
             {loading ? (
               <span className="pulse-dot" aria-hidden="true" />
@@ -1287,7 +1287,7 @@ export default function Home() {
                   onClick={() => onSearchModeChange(mode)}
                   className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
                     active
-                      ? "bg-exablue text-white"
+                      ? "bg-exablue text-gray-900"
                       : "bg-transparent text-gray-600"
                   }`}
                 >
@@ -1314,7 +1314,7 @@ export default function Home() {
                   onClick={() => onSearchTypeChange(type)}
                   className={`rounded-full px-4 py-1.5 text-sm font-medium capitalize transition-colors disabled:opacity-60 ${
                     active
-                      ? "bg-exablue text-white"
+                      ? "bg-exablue text-gray-900"
                       : "bg-transparent text-gray-600"
                   }`}
                 >

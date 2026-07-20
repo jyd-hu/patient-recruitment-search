@@ -167,8 +167,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     );
   } else if (screen === "problem") {
     const lines = [
-      "80-85% of trials miss their enrollment timeline.",
-      "Recruitment alone eats 20-30% of total trial budget.",
+      <>
+        <span className="text-delfa-yellow">80-85%</span> of trials miss their
+        enrollment timeline.
+      </>,
+      <>
+        Recruitment alone eats{" "}
+        <span className="text-delfa-yellow">20-30%</span> of total trial budget.
+      </>,
     ];
     const hintDelay = hintDelayAfterLastLine(lines.length - 1);
 
@@ -179,7 +185,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       >
         <div className="flex flex-col gap-6">
           {lines.map((line, i) => (
-            <FadeIn key={line} delayMs={i * STAGGER_MS} skip={skip}>
+            <FadeIn key={i} delayMs={i * STAGGER_MS} skip={skip}>
               <p className="text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
                 {line}
               </p>
@@ -222,8 +228,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       >
         <FadeIn skip={skip}>
           <p className="text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
-            Trial-Scout surfaces patient channels and physicians, not
-            individual patients.
+            <span className="text-delfa-yellow">Trial-Scout</span> surfaces
+            patient channels and physicians, not individual patients.
           </p>
         </FadeIn>
         <FadeIn delayMs={STAGGER_MS} skip={skip} className="mt-8">
@@ -246,18 +252,27 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     <div className="fixed inset-0 z-50">
       <div
         aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-delfa-cream"
+      />
+      <div
+        aria-hidden
         className="pointer-events-none absolute inset-0 z-0 bg-no-repeat"
         style={{
           backgroundImage: "url(/onboarding-bg.jpg)",
           backgroundSize: "120%",
           backgroundPosition: BG_POSITION[screen],
           transition: "background-position 800ms ease-out",
-          filter: "grayscale(40%)",
+          filter: "grayscale(40%) sepia(35%) saturate(140%) hue-rotate(5deg)",
+          opacity: 0.55,
         }}
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 z-0 bg-black/60"
+        className="pointer-events-none absolute inset-0 z-0 bg-[#FFCA51]/25"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 z-0 bg-black/50"
       />
       {content}
     </div>
