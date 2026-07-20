@@ -228,13 +228,20 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       >
         <FadeIn skip={skip}>
           <p className="text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
-            <span className="text-delfa-yellow">Trial-Scout</span> surfaces
-            patient channels and physicians, not individual patients.
+            Trial-Scout surfaces{" "}
+            <span className="text-delfa-yellow">patient channels</span>* and{" "}
+            <span className="text-delfa-yellow">physicians</span>:
+          </p>
+          <p className="mt-6 text-5xl font-semibold tracking-tight text-balance sm:text-6xl">
+            the widest point of the funnel,{" "}
+            <span className="text-delfa-yellow">
+              one layer before patient conversion
+            </span>
           </p>
         </FadeIn>
         <FadeIn delayMs={STAGGER_MS} skip={skip} className="mt-8">
           <p className="max-w-2xl text-lg leading-relaxed text-white/75 text-balance sm:text-xl">
-            Patient data is private and often regulated (HIPAA/GDPR). Channels
+            * Patient data is private and often regulated (HIPAA/GDPR). Channels
             (communities, forums, advocacy groups) are public, aggregate, and
             consent-safe to target.
           </p>

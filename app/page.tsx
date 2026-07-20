@@ -708,7 +708,7 @@ const ONBOARDING_CALLOUTS: {
   {
     target: "type",
     label:
-      "Demo only — toggle Neural vs Keyword to compare Exa neural search with standard keyword search",
+      "Toggle Neural vs Keyword to compare neural search with standard keyword search",
   },
   {
     target: "score",
